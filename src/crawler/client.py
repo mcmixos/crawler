@@ -150,7 +150,7 @@ class AsyncCrawler:
                     if queue.get_stats()["processed"] >= max_pages:
                         continue
 
-                    for link in data.get("links", []):
+                    for link in data["links"]:
                         if not self._should_visit(
                             link, base_hosts, same_domain_only, include_re, exclude_re
                         ):
@@ -183,8 +183,8 @@ class AsyncCrawler:
         url: str,
         base_hosts: set[str],
         same_domain_only: bool,
-        include_re: list,
-        exclude_re: list,
+        include_re: list[re.Pattern],
+        exclude_re: list[re.Pattern],
     ) -> bool:
         parsed = urlparse(url)
         if parsed.scheme not in _VALID_SCHEMES or not parsed.netloc:

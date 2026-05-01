@@ -35,6 +35,7 @@ class SemaphoreManager:
 
     @property
     def active(self) -> int:
+        """Number of tasks currently inside the critical section (both semaphores held)."""
         return self._active
 
     def _get_host_sem(self, host: str) -> asyncio.Semaphore:
