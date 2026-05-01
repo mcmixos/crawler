@@ -8,10 +8,10 @@ from crawler import AsyncCrawler
 URLS = [
     "https://example.com",
     "https://httpbin.org/html",
-    "https://httpbin.org/status/200",
-    "https://httpbin.org/delay/1",
-    "https://httpbin.org/delay/2",
-    "https://httpbin.org/delay/1",
+    "https://httpbin.org/delay/2?n=1",
+    "https://httpbin.org/delay/2?n=2",
+    "https://httpbin.org/delay/1?n=1",
+    "https://httpbin.org/delay/1?n=2",
     "https://httpbin.org/status/404",
     "https://nonexistent-domain-for-test-12345.invalid",
 ]
@@ -38,7 +38,7 @@ async def fetch_sequential(crawler: AsyncCrawler, urls: list[str]) -> dict[str, 
 async def main() -> None:
     setup_logging()
 
-    async with AsyncCrawler(max_concurrent=5, connect_timeout=5.0) as crawler:
+    async with AsyncCrawler(max_concurrent=10, connect_timeout=5.0) as crawler:
         print(f"\n--- Parallel run ({len(URLS)} URLs) ---")
         t0 = time.perf_counter()
         parallel_results = await crawler.fetch_urls(URLS)
