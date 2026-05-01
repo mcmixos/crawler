@@ -38,7 +38,7 @@ class HTMLParser:
         same_domain_only: bool = False,
     ) -> list[str]:
         try:
-            base_host = urlparse(base_url).netloc
+            base_host = urlparse(base_url).netloc.lower()
             seen: set[str] = set()
             links: list[str] = []
             for tag in soup.find_all("a", href=True):
@@ -49,7 +49,7 @@ class HTMLParser:
                 parsed = urlparse(absolute)
                 if parsed.scheme not in _VALID_SCHEMES or not parsed.netloc:
                     continue
-                if same_domain_only and parsed.netloc != base_host:
+                if same_domain_only and parsed.netloc.lower() != base_host:
                     continue
                 if absolute in seen:
                     continue
@@ -65,6 +65,7 @@ class HTMLParser:
         soup: BeautifulSoup,
         selector: Optional[str] = None,
     ) -> str:
+        """Extract visible text. Mutates soup: removes <script>/<style>/<noscript> tags."""
         try:
             if selector is not None:
                 target = soup.select_one(selector)

@@ -90,6 +90,13 @@ def test_extract_links_same_domain_only(parser):
     assert links == ["https://example.com/x"]
 
 
+def test_extract_links_same_domain_case_insensitive(parser):
+    soup = make_soup("<a href='https://EXAMPLE.com/x'>1</a><a href='/y'>2</a>")
+    links = parser.extract_links(soup, "https://example.com", same_domain_only=True)
+    assert "https://EXAMPLE.com/x" in links
+    assert "https://example.com/y" in links
+
+
 def test_extract_text_ignores_script_and_style(parser):
     html = (
         "<html><head><style>body{color:red}</style></head>"
