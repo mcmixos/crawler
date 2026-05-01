@@ -113,51 +113,52 @@ class AsyncCrawler:
             queue.add_url(url, depth=0)
 
         done_event = asyncio.Event()
+        cond = asyncio.Condition()
         active = 0
         start_time = time.perf_counter()
 
         async def worker() -> None:
             nonlocal active
-            while not done_event.is_set():
-                if queue.get_stats()["processed"] >= max_pages:
-                    if active == 0:
-                        done_event.set()
-                        return
-                    await asyncio.sleep(0.05)
-                    continue
+            while True:
+                async with cond:
+                    while True:
+                        if done_event.is_set():
+                            return
+                        if queue.get_stats()["processed"] >= max_pages:
+                            done_event.set()
+                            cond.notify_all()
+                            return
+                        if not queue.empty():
+                            break
+                        if active == 0:
+                            done_event.set()
+                            cond.notify_all()
+                            return
+                        await cond.wait()
+                    url = await queue.get_next()
+                    active += 1
 
-                url = await queue.get_next()
-                if url is None:
-                    if active == 0 and queue.empty():
-                        done_event.set()
-                        return
-                    await asyncio.sleep(0.05)
-                    continue
-
-                active += 1
                 try:
-                    try:
-                        data = await self.fetch_and_parse(url)
-                    except Exception as exc:
-                        queue.mark_failed(url, f"{exc.__class__.__name__}: {exc}")
-                        continue
-
+                    data = await self.fetch_and_parse(url)
                     queue.mark_processed(url, data)
-
                     depth = queue.get_depth(url)
-                    if depth >= self._max_depth:
-                        continue
-                    if queue.get_stats()["processed"] >= max_pages:
-                        continue
-
-                    for link in data["links"]:
-                        if not self._should_visit(
-                            link, base_hosts, same_domain_only, include_re, exclude_re
-                        ):
-                            continue
-                        queue.add_url(link, depth=depth + 1)
+                    if depth < self._max_depth and queue.get_stats()["processed"] < max_pages:
+                        async with cond:
+                            added = False
+                            for link in data["links"]:
+                                if self._should_visit(
+                                    link, base_hosts, same_domain_only, include_re, exclude_re
+                                ):
+                                    if queue.add_url(link, depth=depth + 1):
+                                        added = True
+                            if added:
+                                cond.notify_all()
+                except Exception as exc:
+                    queue.mark_failed(url, f"{exc.__class__.__name__}: {exc}")
                 finally:
-                    active -= 1
+                    async with cond:
+                        active -= 1
+                        cond.notify_all()
 
         async def reporter() -> None:
             while not done_event.is_set():
