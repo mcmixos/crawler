@@ -69,6 +69,30 @@ data = await parser.parse_html(html_string, "https://example.com")
 
 У парсера есть дополнительные методы для конкретных типов данных: `extract_images`, `extract_headings`, `extract_tables`, `extract_lists`.
 
+## Crawl
+
+Метод `crawl()` обходит сайт целиком: ставит стартовые URL в очередь, забирает HTML, парсит, извлекает ссылки, кладёт их обратно в очередь. Поддерживает контроль глубины, фильтры по доменам/паттернам, лимит страниц.
+
+```python
+async with AsyncCrawler(
+    max_concurrent=10,
+    max_per_host=3,
+    max_depth=2,
+) as crawler:
+    results = await crawler.crawl(
+        start_urls=["https://example.com"],
+        max_pages=50,
+        same_domain_only=True,
+        exclude_patterns=[r"\.(jpg|png|pdf)$"],
+    )
+```
+
+Возвращает `{url: parsed_data}` для всех успешно обработанных страниц. Прогресс пишется в логи раз в секунду.
+
+Конкурентность управляется `SemaphoreManager`: глобальный лимит (`max_concurrent`) и per-host (`max_per_host`). Используется внутри AsyncCrawler автоматически - все вызовы fetch_url проходят через него.
+
+`CrawlerQueue` - очередь с приоритетами, отслеживанием глубины и состояний (visited / processed / failed). Доступна как самостоятельный класс через `from crawler import CrawlerQueue`.
+
 ## Демо
 
 ```
@@ -91,6 +115,8 @@ pytest
 src/crawler/
   client.py        - AsyncCrawler
   parser.py        - HTMLParser
+  queue.py         - CrawlerQueue
+  concurrency.py   - SemaphoreManager
 examples/
   demo.py          - пример с замером времени
 tests/
