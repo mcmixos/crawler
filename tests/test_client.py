@@ -117,3 +117,32 @@ def test_invalid_timeout_rejected():
         AsyncCrawler(connect_timeout=0)
     with pytest.raises(ValueError):
         AsyncCrawler(read_timeout=-1)
+
+
+async def test_fetch_and_parse_returns_structured_data():
+    url = "https://example.test/page"
+    html = (
+        "<html><head><title>Hi</title>"
+        "<meta name='description' content='desc'></head>"
+        "<body><h1>Heading</h1>"
+        "<a href='/relative'>rel</a>"
+        "<a href='https://other.test/abs'>abs</a></body></html>"
+    )
+    with aioresponses() as mocked:
+        mocked.get(url, status=200, body=html, content_type="text/html")
+        async with AsyncCrawler() as crawler:
+            result = await crawler.fetch_and_parse(url)
+    assert result["url"] == url
+    assert result["title"] == "Hi"
+    assert "https://example.test/relative" in result["links"]
+    assert "https://other.test/abs" in result["links"]
+    assert result["metadata"]["description"] == "desc"
+
+
+async def test_fetch_and_parse_propagates_fetch_errors():
+    url = "https://example.test/bad"
+    with aioresponses() as mocked:
+        mocked.get(url, status=500)
+        async with AsyncCrawler() as crawler:
+            with pytest.raises(aiohttp.ClientResponseError):
+                await crawler.fetch_and_parse(url)

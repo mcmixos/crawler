@@ -47,6 +47,28 @@ asyncio.run(main())
 - `read_timeout` - таймаут чтения ответа, сек (30)
 - `user_agent` - заголовок User-Agent
 
+## Парсинг HTML
+
+`fetch_and_parse(url)` загружает страницу и возвращает структуру `{url, title, text, links, metadata}`:
+
+```python
+async with AsyncCrawler() as crawler:
+    result = await crawler.fetch_and_parse("https://example.com")
+    print(result["title"])
+    print(len(result["links"]), "ссылок")
+```
+
+Парсер также доступен напрямую как `HTMLParser` - полезно, если HTML уже есть на руках:
+
+```python
+from crawler import HTMLParser
+
+parser = HTMLParser()
+data = await parser.parse_html(html_string, "https://example.com")
+```
+
+У парсера есть дополнительные методы для конкретных типов данных: `extract_images`, `extract_headings`, `extract_tables`, `extract_lists`.
+
 ## Демо
 
 ```
@@ -68,6 +90,7 @@ pytest
 ```
 src/crawler/
   client.py        - AsyncCrawler
+  parser.py        - HTMLParser
 examples/
   demo.py          - пример с замером времени
 tests/

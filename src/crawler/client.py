@@ -4,6 +4,8 @@ from typing import Optional
 
 import aiohttp
 
+from crawler.parser import HTMLParser
+
 logger = logging.getLogger(__name__)
 
 
@@ -31,6 +33,7 @@ class AsyncCrawler:
         self._semaphore = asyncio.Semaphore(max_concurrent)
         self._session_lock = asyncio.Lock()
         self._session: Optional[aiohttp.ClientSession] = None
+        self._parser = HTMLParser()
 
     async def fetch_url(self, url: str) -> str:
         """Download a single URL and return its body as text."""
@@ -62,6 +65,11 @@ class AsyncCrawler:
             for url, outcome in zip(urls, outcomes)
             if isinstance(outcome, str)
         }
+
+    async def fetch_and_parse(self, url: str) -> dict:
+        """Fetch a URL and parse its HTML body into structured data."""
+        html = await self.fetch_url(url)
+        return await self._parser.parse_html(html, url)
 
     async def close(self) -> None:
         """Close the underlying HTTP session if it is open."""
