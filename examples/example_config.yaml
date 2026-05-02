@@ -1,0 +1,34 @@
+start_urls:
+  - https://httpbin.org/links/10/0
+
+sitemap_urls: []
+
+max_pages: 10
+
+crawler:
+  max_concurrent: 5
+  max_per_host: 3
+  max_depth: 1
+  requests_per_second: 2.0
+  min_delay: 0.3
+  jitter: 0.2
+  respect_robots: true
+  max_retries: 1
+  backoff_base: 0.5
+  user_agent: "AdvancedCrawler/1.0"
+
+filters:
+  same_domain_only: true
+  exclude_patterns: []
+  include_patterns: []
+
+storage:
+  type: sqlite
+  path: output/full_demo.db
+  batch_size: 50
+
+logging:
+  level: INFO
+  file: output/crawler.log
+  max_bytes: 1048576
+  backup_count: 3

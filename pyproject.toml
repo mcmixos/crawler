@@ -13,7 +13,11 @@ dependencies = [
     "aiosqlite>=0.19",
     "beautifulsoup4>=4.12",
     "lxml>=5.0",
+    "pyyaml>=6.0",
 ]
+
+[project.scripts]
+crawler = "crawler.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

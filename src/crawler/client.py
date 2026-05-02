@@ -397,8 +397,8 @@ class AsyncCrawler:
                 try:
                     await asyncio.wait_for(done_event.wait(), timeout=1.0)
                 except asyncio.TimeoutError:
-                    self._log_progress(queue, start_time)
-            self._log_progress(queue, start_time, final=True)
+                    self._log_progress(queue, start_time, max_pages=max_pages)
+            self._log_progress(queue, start_time, max_pages=max_pages, final=True)
 
         workers = [asyncio.create_task(worker()) for _ in range(self._max_concurrent)]
         progress_task = asyncio.create_task(reporter())
@@ -430,13 +430,24 @@ class AsyncCrawler:
             return False
         return True
 
-    def _log_progress(self, queue: CrawlerQueue, start_time: float, final: bool = False) -> None:
+    def _log_progress(
+        self,
+        queue: CrawlerQueue,
+        start_time: float,
+        max_pages: Optional[int] = None,
+        final: bool = False,
+    ) -> None:
         stats = queue.get_stats()
         elapsed = max(time.perf_counter() - start_time, 1e-6)
         rate = stats["processed"] / elapsed
+        eta_str = ""
+        if max_pages is not None and not final and rate > 0:
+            remaining = max(max_pages - stats["processed"], 0)
+            eta = int(remaining / rate)
+            eta_str = f" eta={eta}s"
         prefix = "crawl done" if final else "crawl"
         logger.info(
-            "%s | processed=%d queued=%d failed=%d blocked=%d retries=%d active=%d rate=%.1f/s",
+            "%s | processed=%d queued=%d failed=%d blocked=%d retries=%d active=%d rate=%.1f/s%s",
             prefix,
             stats["processed"],
             stats["queued"],
@@ -445,6 +456,7 @@ class AsyncCrawler:
             self._retry_strategy.get_stats()["retries_total"],
             self._sem_manager.active,
             rate,
+            eta_str,
         )
 
     async def close(self) -> None:
