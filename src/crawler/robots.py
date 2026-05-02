@@ -3,9 +3,12 @@ from typing import Awaitable, Callable, Optional
 from urllib.parse import urlparse
 from urllib.robotparser import RobotFileParser
 
+from crawler._utils import BoundedDict
+
 logger = logging.getLogger(__name__)
 
 Fetcher = Callable[[str], Awaitable[Optional[str]]]
+_DEFAULT_CACHE_SIZE = 1000
 
 
 class RobotsBlocked(Exception):
@@ -23,9 +26,9 @@ class RobotsParser:
     signature) so that one parser can serve multiple hosts without per-host instances.
     """
 
-    def __init__(self, fetcher: Fetcher) -> None:
+    def __init__(self, fetcher: Fetcher, cache_size: int = _DEFAULT_CACHE_SIZE) -> None:
         self._fetcher = fetcher
-        self._cache: dict[str, tuple[RobotFileParser, bool]] = {}
+        self._cache: BoundedDict = BoundedDict(cache_size)
 
     async def fetch_robots(self, base_url: str) -> dict:
         host_origin = self._origin_of(base_url)

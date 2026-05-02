@@ -366,3 +366,36 @@ async def test_circuit_breaker_resets_on_success():
             with pytest.raises(TransientError):
                 await crawler.fetch_url(bad)
             assert cb.is_open("example.test") is False
+
+
+async def test_cookies_param_sets_session_cookies():
+    async with AsyncCrawler(cookies={"session_id": "abc123"}) as crawler:
+        session = await crawler._ensure_session()
+        cookies = list(session.cookie_jar)
+    assert any(c.key == "session_id" and c.value == "abc123" for c in cookies)
+
+
+async def test_fetch_and_parse_uses_final_url_after_redirect():
+    redirect_from = "https://example.test/old"
+    redirect_to = "https://example.test/sub/new"
+    html = "<a href='child'>x</a>"
+    with aioresponses() as m:
+        m.get(redirect_from, status=301, headers={"Location": redirect_to})
+        m.get(redirect_to, body=html, content_type="text/html")
+        async with AsyncCrawler() as crawler:
+            data = await crawler.fetch_and_parse(redirect_from)
+    assert data["url"] == redirect_from
+    assert data["final_url"] == redirect_to
+    assert "https://example.test/sub/child" in data["links"]
+
+
+async def test_permanent_failures_bounded():
+    from crawler.client import _PERMANENT_FAILURES_MAX
+
+    crawler = AsyncCrawler()
+    for i in range(_PERMANENT_FAILURES_MAX + 5):
+        crawler._permanent_failures[f"https://x.com/{i}"] = "err"
+    assert len(crawler._permanent_failures) == _PERMANENT_FAILURES_MAX
+    assert "https://x.com/0" not in crawler._permanent_failures
+    assert f"https://x.com/{_PERMANENT_FAILURES_MAX + 4}" in crawler._permanent_failures
+    await crawler.close()

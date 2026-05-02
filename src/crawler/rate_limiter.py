@@ -4,9 +4,12 @@ import random
 import time
 from typing import Optional
 
+from crawler._utils import BoundedDict
+
 logger = logging.getLogger(__name__)
 
 _GLOBAL_KEY = "__global__"
+_DEFAULT_CACHE_SIZE = 1000
 
 
 class RateLimiter:
@@ -23,6 +26,7 @@ class RateLimiter:
         per_domain: bool = True,
         min_delay: float = 0.0,
         jitter: float = 0.0,
+        cache_size: int = _DEFAULT_CACHE_SIZE,
     ) -> None:
         if requests_per_second <= 0:
             raise ValueError("requests_per_second must be > 0")
@@ -34,8 +38,8 @@ class RateLimiter:
         self._base_interval = max(1.0 / requests_per_second, min_delay)
         self._jitter = jitter
         self._per_domain = per_domain
-        self._next_allowed: dict[str, float] = {}
-        self._domain_overrides: dict[str, float] = {}
+        self._next_allowed: BoundedDict = BoundedDict(cache_size)
+        self._domain_overrides: BoundedDict = BoundedDict(cache_size)
 
     async def acquire(self, domain: Optional[str] = None) -> None:
         key = domain if (self._per_domain and domain) else _GLOBAL_KEY

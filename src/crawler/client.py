@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 
 import aiohttp
 
+from crawler._utils import BoundedDict
 from crawler.concurrency import SemaphoreManager
 from crawler.errors import (
     CircuitOpenError,
@@ -23,6 +24,9 @@ from crawler.rate_limiter import RateLimiter
 from crawler.retry import CircuitBreaker, RetryStrategy
 from crawler.robots import RobotsBlocked, RobotsParser
 from crawler.storage import DataStorage
+
+_PERMANENT_FAILURES_MAX = 10000
+_ROBOTS_LOADED_MAX = 1000
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +56,7 @@ class AsyncCrawler:
         read_timeout: float = 30.0,
         total_timeout: Optional[float] = None,
         user_agent: "str | list[str]" = "AsyncCrawler/0.1",
+        cookies: Optional[dict] = None,
     ) -> None:
         if max_concurrent < 1:
             raise ValueError("max_concurrent must be >= 1")
@@ -120,14 +125,15 @@ class AsyncCrawler:
         self._robots: Optional[RobotsParser] = (
             RobotsParser(fetcher=self._fetch_robots_text) if respect_robots else None
         )
-        self._robots_loaded: set[str] = set()
+        self._robots_loaded: BoundedDict = BoundedDict(_ROBOTS_LOADED_MAX)
         self._robots_init_lock = asyncio.Lock()
 
+        self._cookies = cookies
         self._request_count = 0
         self._total_request_time = 0.0
         self._blocked_count = 0
         self._circuit_blocked_count = 0
-        self._permanent_failures: dict[str, str] = {}
+        self._permanent_failures: BoundedDict = BoundedDict(_PERMANENT_FAILURES_MAX)
         self._stats_start_time: Optional[float] = None
 
     async def fetch_url(self, url: str) -> str:
@@ -200,6 +206,7 @@ class AsyncCrawler:
                     "text": text,
                     "status_code": response.status,
                     "content_type": response.headers.get("Content-Type"),
+                    "final_url": str(response.url),
                 }
         except CrawlerError:
             raise
@@ -240,7 +247,7 @@ class AsyncCrawler:
             if domain in self._robots_loaded:
                 return
             info = await self._robots.fetch_robots(url)
-            self._robots_loaded.add(domain)
+            self._robots_loaded[domain] = None
             crawl_delay = info.get("crawl_delay")
             if crawl_delay:
                 if self._rate_limiter is not None:
@@ -302,10 +309,15 @@ class AsyncCrawler:
         """Fetch a URL and parse its HTML body into structured data.
 
         Returns the parser dict enriched with crawled_at (ISO UTC), status_code,
-        and content_type from the HTTP response.
+        content_type, and final_url (after redirects). Links are resolved against
+        final_url so relative URLs are correct even after cross-path/cross-host redirects.
+        The 'url' field is the originally requested URL (identity for queue/storage).
         """
         meta = await self.fetch_with_meta(url)
-        parsed = await self._parser.parse_html(meta["text"], url)
+        final_url = meta.get("final_url") or url
+        parsed = await self._parser.parse_html(meta["text"], final_url)
+        parsed["url"] = url
+        parsed["final_url"] = final_url
         parsed["crawled_at"] = datetime.now(timezone.utc).isoformat()
         parsed["status_code"] = meta["status_code"]
         parsed["content_type"] = meta["content_type"]
@@ -481,5 +493,6 @@ class AsyncCrawler:
                 self._session = aiohttp.ClientSession(
                     timeout=self._timeout,
                     connector=connector,
+                    cookies=self._cookies,
                 )
             return self._session
