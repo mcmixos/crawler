@@ -3,7 +3,7 @@ import logging
 import random
 import re
 import time
-from typing import Optional, Union
+from typing import Optional
 from urllib.parse import urlparse
 
 import aiohttp
@@ -20,7 +20,9 @@ _VALID_SCHEMES = {"http", "https"}
 
 
 class AsyncCrawler:
-    """Asynchronous HTTP client with bounded concurrency and a shared session."""
+    """Asynchronous web crawler: HTTP client, HTML parser, BFS traversal with priority
+    queue, semaphore-based concurrency control, rate limiting, and robots.txt enforcement.
+    """
 
     def __init__(
         self,
@@ -35,7 +37,7 @@ class AsyncCrawler:
         backoff_base: float = 1.0,
         connect_timeout: float = 10.0,
         read_timeout: float = 30.0,
-        user_agent: Union[str, list[str]] = "AsyncCrawler/0.1",
+        user_agent: "str | list[str]" = "AsyncCrawler/0.1",
     ) -> None:
         if max_concurrent < 1:
             raise ValueError("max_concurrent must be >= 1")
@@ -185,8 +187,9 @@ class AsyncCrawler:
     async def _fetch_robots_text(self, url: str) -> Optional[str]:
         """Fetch robots.txt without going through robots/rate-limit/semaphore checks."""
         session = await self._ensure_session()
+        headers = {"User-Agent": self._user_agents[0]}
         try:
-            async with session.get(url) as response:
+            async with session.get(url, headers=headers) as response:
                 if response.status == 404:
                     return None
                 response.raise_for_status()
@@ -206,8 +209,15 @@ class AsyncCrawler:
             info = await self._robots.fetch_robots(url)
             self._robots_loaded.add(domain)
             crawl_delay = info.get("crawl_delay")
-            if crawl_delay and self._rate_limiter is not None:
-                self._rate_limiter.set_domain_interval(domain, crawl_delay)
+            if crawl_delay:
+                if self._rate_limiter is not None:
+                    self._rate_limiter.set_domain_interval(domain, crawl_delay)
+                else:
+                    logger.warning(
+                        "robots.txt for %s sets Crawl-delay=%s but no rate limiter "
+                        "is configured - delay will not be enforced",
+                        domain, crawl_delay,
+                    )
 
     def get_stats(self) -> dict:
         if self._stats_start_time is None or self._request_count == 0:
@@ -225,9 +235,10 @@ class AsyncCrawler:
             if self._request_count > 1 else 0.0
         )
         avg_request_ms = self._total_request_time / self._request_count * 1000
+        rate_per_sec = self._request_count / elapsed if self._request_count > 1 else 0.0
         return {
             "requests": self._request_count,
-            "rate_per_sec": self._request_count / elapsed,
+            "rate_per_sec": rate_per_sec,
             "avg_interval_ms": avg_interval_ms,
             "avg_request_ms": avg_request_ms,
             "blocked_by_robots": self._blocked_count,

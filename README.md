@@ -151,7 +151,16 @@ src/crawler/
   rate_limiter.py  - RateLimiter
   robots.py        - RobotsParser, RobotsBlocked
 examples/
-  demo.py          - пример с замером времени
+  demo.py          - параллель vs последовательно (день 1)
+  parse_demo.py    - парсинг страниц + JSON (день 2)
+  crawl_demo.py    - обход с очередью и глубиной (день 3)
+  polite_demo.py   - rate limit + robots.txt + retries (день 4)
 tests/
-  test_client.py   - pytest + aioresponses
+  test_client.py
+  test_parser.py
+  test_queue.py
+  test_concurrency.py
+  test_crawl.py
+  test_rate_limiter.py
+  test_robots.py
 ```

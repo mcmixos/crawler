@@ -199,13 +199,16 @@ async def test_get_stats_initially_zero():
 
 
 async def test_get_stats_tracks_requests():
-    url = "https://example.test/page"
+    url1 = "https://example.test/page1"
+    url2 = "https://example.test/page2"
     with aioresponses() as mocked:
-        mocked.get(url, status=200, body="hello")
+        mocked.get(url1, status=200, body="a")
+        mocked.get(url2, status=200, body="b")
         async with AsyncCrawler() as crawler:
-            await crawler.fetch_url(url)
+            await crawler.fetch_url(url1)
+            await crawler.fetch_url(url2)
             stats = crawler.get_stats()
-    assert stats["requests"] == 1
+    assert stats["requests"] == 2
     assert stats["rate_per_sec"] > 0
 
 

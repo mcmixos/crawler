@@ -25,7 +25,7 @@ class RobotsParser:
 
     def __init__(self, fetcher: Fetcher) -> None:
         self._fetcher = fetcher
-        self._cache: dict[str, RobotFileParser] = {}
+        self._cache: dict[str, tuple[RobotFileParser, bool]] = {}
 
     async def fetch_robots(self, base_url: str) -> dict:
         host_origin = self._origin_of(base_url)
@@ -34,7 +34,8 @@ class RobotsParser:
 
         cached = self._cache.get(host_origin)
         if cached is not None:
-            return self._summarize(host_origin, cached, fetched=True)
+            rp, fetched = cached
+            return self._summarize(host_origin, rp, fetched=fetched)
 
         robots_url = host_origin + "/robots.txt"
         text: Optional[str] = None
@@ -50,25 +51,27 @@ class RobotsParser:
         else:
             rp.allow_all = True
             fetched = False
-        self._cache[host_origin] = rp
+        self._cache[host_origin] = (rp, fetched)
         return self._summarize(host_origin, rp, fetched=fetched)
 
     def can_fetch(self, url: str, user_agent: str = "*") -> bool:
         host_origin = self._origin_of(url)
         if host_origin is None:
             return True
-        rp = self._cache.get(host_origin)
-        if rp is None:
+        cached = self._cache.get(host_origin)
+        if cached is None:
             return True
+        rp, _ = cached
         return rp.can_fetch(user_agent, url)
 
     def get_crawl_delay(self, base_url: str, user_agent: str = "*") -> float:
         host_origin = self._origin_of(base_url)
         if host_origin is None:
             return 0.0
-        rp = self._cache.get(host_origin)
-        if rp is None:
+        cached = self._cache.get(host_origin)
+        if cached is None:
             return 0.0
+        rp, _ = cached
         delay = rp.crawl_delay(user_agent)
         return float(delay) if delay is not None else 0.0
 

@@ -55,9 +55,16 @@ class RateLimiter:
         """Raise the minimum interval for a specific domain (e.g. from robots Crawl-delay).
 
         Only takes effect if the new interval is greater than the current one for the domain.
+        With per_domain=False, logs a warning and overrides the global interval instead.
         """
         if interval < 0:
             raise ValueError("interval must be >= 0")
+        if not self._per_domain:
+            logger.warning(
+                "set_domain_interval(%s, %s) called on a global RateLimiter "
+                "(per_domain=False) - overriding the GLOBAL interval, not just this domain",
+                domain, interval,
+            )
         key = domain if self._per_domain else _GLOBAL_KEY
         current = self._domain_overrides.get(key, self._base_interval)
         if interval > current:
