@@ -1,6 +1,10 @@
 # crawler
 
+![tests](https://github.com/USER/REPO/actions/workflows/test.yml/badge.svg)
+
 Асинхронный веб-краулер на Python: HTTP, парсинг HTML, обход по ссылкам с приоритетной очередью, rate limiting, robots.txt, retry с exp backoff, circuit breaker, сохранение в JSON/CSV/SQLite, sitemap, статистика и HTML-отчёты.
+
+> Замени `USER/REPO` в badge'е на реальный путь после первого пуша на GitHub.
 
 ## Требования
 
@@ -165,6 +169,29 @@ retry = RetryStrategy(max_retries=3, retry_on=[TransientError])
 result = await retry.execute_with_retry(some_async_func, arg)
 ```
 
+## Cookies
+
+Параметр `cookies: dict | None` в `AsyncCrawler` принимает начальные cookies для всех запросов:
+
+```python
+async with AsyncCrawler(cookies={"session_id": "abc123"}) as crawler:
+    data = await crawler.fetch_and_parse("https://protected.example.com/page")
+```
+
+aiohttp дальше держит cookie jar автоматически в рамках сессии: cookies из `Set-Cookie` сохраняются и переотправляются при последующих запросах к тому же домену. Это покрывает типичную авторизацию по сессии. Сохранение cookies в файл между запусками не реализовано (можно поверх через `aiohttp.CookieJar.save/load`).
+
+## Редиректы
+
+`fetch_and_parse(url)` корректно обрабатывает HTTP-редиректы (3xx + Location): aiohttp следует за редиректом, относительные ссылки парсятся **относительно финального URL**. В возвращаемом dict:
+- `url` - исходный запрошенный URL (identity для очереди и storage)
+- `final_url` - URL после всех редиректов (используется как base для парсинга ссылок)
+
+Это важно при cross-path/cross-host редиректах - без этого относительные `<a href="...">` разрешались бы относительно неправильной базы.
+
+## CI
+
+`.github/workflows/test.yml` запускает `pytest` на push/PR в main/master, матрица Python 3.10 / 3.11 / 3.12 на ubuntu-latest. Достаточно запушить - тесты погонятся автоматически. Бейдж в шапке README отражает статус последнего запуска (после первого пуша подмени `USER/REPO`).
+
 ## Демо
 
 ```
@@ -204,6 +231,9 @@ src/crawler/
   config.py          - CrawlerConfig (YAML)
   logging_setup.py   - setup_logging() с RotatingFileHandler
   cli.py             - CLI entry point
+  _utils.py          - BoundedDict (LRU-like для внутренних кэшей)
+.github/workflows/
+  test.yml           - GitHub Actions: pytest на 3 версиях Python
 examples/
   demo.py
   parse_demo.py
@@ -218,5 +248,6 @@ tests/
   test_crawl.py / test_rate_limiter.py / test_robots.py
   test_errors.py / test_retry.py / test_circuit.py
   test_storage.py / test_sitemap.py / test_stats.py
+  test_config.py / test_advanced.py / test_utils.py
   test_config.py / test_advanced.py
 ```
