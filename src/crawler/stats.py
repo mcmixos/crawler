@@ -12,22 +12,28 @@ logger = logging.getLogger(__name__)
 
 
 class CrawlerStats:
-    """Collects per-request stats and renders them as JSON or HTML."""
+    """Collects per-request stats and renders them as JSON or HTML.
+
+    Runtime starts at construction; call mark_start() to reset the anchor (useful
+    when stats are populated post-hoc and you want runtime to reflect the crawl
+    window, not the time since instance creation).
+    """
 
     def __init__(self) -> None:
-        self._start_time = time.monotonic()
+        self._start_time: float = time.monotonic()
         self._status_counts: Counter[int] = Counter()
         self._domain_counts: Counter[str] = Counter()
         self._successful = 0
         self._failed = 0
-        self._total_duration = 0.0
+
+    def mark_start(self) -> None:
+        self._start_time = time.monotonic()
 
     def record_request(
         self,
         url: str,
         success: bool,
         status_code: Optional[int] = None,
-        duration: float = 0.0,
     ) -> None:
         if success:
             self._successful += 1
@@ -38,8 +44,6 @@ class CrawlerStats:
         host = urlparse(url).netloc.lower()
         if host:
             self._domain_counts[host] += 1
-        if duration > 0:
-            self._total_duration += duration
 
     @property
     def total_pages(self) -> int:
@@ -54,12 +58,6 @@ class CrawlerStats:
         runtime = self.runtime_seconds
         return self.total_pages / runtime if runtime > 0 else 0.0
 
-    @property
-    def avg_request_ms(self) -> float:
-        if self._successful == 0:
-            return 0.0
-        return self._total_duration / self._successful * 1000
-
     def top_domains(self, n: int = 10) -> list[tuple[str, int]]:
         return self._domain_counts.most_common(n)
 
@@ -73,7 +71,6 @@ class CrawlerStats:
             "failed": self._failed,
             "runtime_seconds": round(self.runtime_seconds, 3),
             "avg_pages_per_sec": round(self.avg_pages_per_sec, 3),
-            "avg_request_ms": round(self.avg_request_ms, 1),
             "status_distribution": self.status_distribution(),
             "top_domains": self.top_domains(),
         }
@@ -129,7 +126,6 @@ th {{ background: #f5f5f5; }}
 <tr><td>Failed</td><td>{data["failed"]}</td></tr>
 <tr><td>Runtime</td><td>{data["runtime_seconds"]} s</td></tr>
 <tr><td>Avg pages/sec</td><td>{data["avg_pages_per_sec"]}</td></tr>
-<tr><td>Avg request</td><td>{data["avg_request_ms"]} ms</td></tr>
 </table>
 
 <h2>Status code distribution</h2>

@@ -1,5 +1,4 @@
 import logging
-import time
 from pathlib import Path
 from typing import Optional
 
@@ -56,6 +55,7 @@ class AdvancedCrawler:
         return cls(CrawlerConfig.from_yaml(path))
 
     async def crawl(self) -> dict[str, dict]:
+        self._stats.mark_start()
         urls = list(self._config.start_urls)
 
         for sitemap_url in self._config.sitemap_urls:
@@ -88,9 +88,11 @@ class AdvancedCrawler:
         return results
 
     def get_stats(self) -> dict:
-        merged = dict(self._stats.to_dict())
-        merged["crawler_internal"] = self._crawler.get_stats()
-        return merged
+        return self._stats.to_dict()
+
+    def get_internal_stats(self) -> dict:
+        """Detailed crawler internals: retries, error counts, blocked URLs, etc."""
+        return self._crawler.get_stats()
 
     def export_to_json(self, path: "str | Path") -> None:
         self._stats.export_to_json(path)

@@ -1,7 +1,10 @@
 import argparse
 import asyncio
 import sys
+from pathlib import Path
 from typing import Optional
+
+import yaml
 
 from crawler.advanced import AdvancedCrawler
 from crawler.config import CrawlerConfig
@@ -48,7 +51,7 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--output",
-        help="Path to JSON stats output (overrides config.storage if needed)",
+        help="Path to JSON file for crawl statistics summary",
     )
     parser.add_argument(
         "--report",
@@ -64,7 +67,15 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
 
 def _build_config(args: argparse.Namespace) -> CrawlerConfig:
     if args.config:
-        config = CrawlerConfig.from_yaml(args.config)
+        path = Path(args.config)
+        if not path.is_file():
+            raise SystemExit(f"error: config file not found: {args.config}")
+        try:
+            config = CrawlerConfig.from_yaml(path)
+        except yaml.YAMLError as exc:
+            raise SystemExit(f"error: failed to parse config {args.config}: {exc}")
+        except OSError as exc:
+            raise SystemExit(f"error: cannot read config {args.config}: {exc}")
     else:
         config = CrawlerConfig()
 
