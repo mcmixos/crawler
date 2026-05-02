@@ -15,11 +15,7 @@ pip install -e .
 pip install -r requirements-dev.txt
 ```
 
-Первая команда ставит сам пакет в editable-режиме вместе с runtime-зависимостями. Вторая - тестовые либы.
-
 ## Quick start
-
-Минимальный пример - краулим один сайт с дефолтами:
 
 ```python
 import asyncio
@@ -32,12 +28,12 @@ async def main():
             max_pages=20,
             same_domain_only=True,
         )
-    print(f"Обработано: {len(results)}")
+    print(len(results))
 
 asyncio.run(main())
 ```
 
-Полный краулер с конфигом, robots, rate limit, SQLite и HTML-отчётом:
+С конфигом и HTML-отчётом:
 
 ```python
 import asyncio
@@ -56,7 +52,7 @@ asyncio.run(main())
 ```
 crawler --urls https://example.com --max-pages 50 --max-depth 2 --respect-robots
 crawler --config examples/example_config.yaml
-crawler --config examples/example_config.yaml --max-pages 200   # CLI > config
+crawler --config examples/example_config.yaml --max-pages 200
 ```
 
 Параметры:
@@ -78,7 +74,7 @@ CLI-флаги переопределяют значения из конфига
 
 ## Конфигурация (YAML)
 
-Полный пример - см. [`examples/example_config.yaml`](examples/example_config.yaml). Все секции опциональны.
+Полный пример: [`examples/example_config.yaml`](examples/example_config.yaml). Все секции опциональны.
 
 ```yaml
 start_urls:
@@ -143,19 +139,17 @@ logging:
 
 ## Архитектура
 
-`AsyncCrawler` - ядро. Координирует:
-1. Circuit breaker (если задан) - проверка перед запросом
-2. Robots.txt (если включён) - lazy load на первый URL домена
-3. Rate limiter (если задан) - sleep до следующего разрешённого слота
-4. Semaphore manager - лимит параллелизма global + per-host
-5. RetryStrategy - повторы на TransientError/NetworkError по умолчанию
-6. Storage (если задан) - автоматический save после успешного fetch_and_parse
+Порядок шагов внутри `AsyncCrawler.fetch_url`:
+1. Circuit breaker check
+2. Robots.txt check (lazy load на первый URL домена)
+3. Rate limiter acquire
+4. Semaphore acquire (global + per-host)
+5. Fetch + retry по `RetryStrategy.retry_on`
+6. Storage save (если задан) после успешного `fetch_and_parse`
 
-`AdvancedCrawler` поверх этого добавляет YAML-конфиг, sitemap-обнаружение URL, агрегированную статистику и HTML-отчёты.
+`AdvancedCrawler` оборачивает всё это в фасад с YAML-конфигом, sitemap-обнаружением URL и агрегированной статистикой.
 
-## Использование напрямую (без AdvancedCrawler)
-
-Любой компонент можно использовать standalone:
+## Использование напрямую
 
 ```python
 from crawler import HTMLParser, RetryStrategy, TransientError
@@ -169,31 +163,27 @@ result = await retry.execute_with_retry(some_async_func, arg)
 
 ## Cookies
 
-Параметр `cookies: dict | None` в `AsyncCrawler` принимает начальные cookies для всех запросов:
-
 ```python
 async with AsyncCrawler(cookies={"session_id": "abc123"}) as crawler:
     data = await crawler.fetch_and_parse("https://protected.example.com/page")
 ```
 
-aiohttp дальше держит cookie jar автоматически в рамках сессии: cookies из `Set-Cookie` сохраняются и переотправляются при последующих запросах к тому же домену. Это покрывает типичную авторизацию по сессии. Сохранение cookies в файл между запусками не реализовано (можно поверх через `aiohttp.CookieJar.save/load`).
+Cookies из `Set-Cookie` накапливаются в session-level jar и переотправляются на последующих запросах к тому же домену. Персистентность между запусками не реализована.
 
 ## Редиректы
 
-`fetch_and_parse(url)` корректно обрабатывает HTTP-редиректы (3xx + Location): aiohttp следует за редиректом, относительные ссылки парсятся **относительно финального URL**. В возвращаемом dict:
-- `url` - исходный запрошенный URL (identity для очереди и storage)
-- `final_url` - URL после всех редиректов (используется как base для парсинга ссылок)
-
-Это важно при cross-path/cross-host редиректах - без этого относительные `<a href="...">` разрешались бы относительно неправильной базы.
+`fetch_and_parse(url)` следует за HTTP-редиректами (3xx + Location). Относительные ссылки разрешаются относительно финального URL. В возвращаемом dict:
+- `url` - исходный запрошенный URL
+- `final_url` - URL после редиректов, используется как base при парсинге
 
 ## CI
 
-`.github/workflows/test.yml` запускает `pytest` на push/PR в main/master, матрица Python 3.10 / 3.11 / 3.12 на ubuntu-latest. Достаточно запушить - тесты погонятся автоматически. Бейдж в шапке README отражает статус последнего запуска.
+`.github/workflows/test.yml`: pytest на push/PR в main, матрица Python 3.10 / 3.11 / 3.12 на ubuntu-latest.
 
 ## Демо
 
 ```
-python examples/demo.py            # параллель vs последовательно (день 1)
+python examples/demo.py            # параллель vs последовательно
 python examples/parse_demo.py      # парсинг страниц + JSON
 python examples/crawl_demo.py      # обход с очередью
 python examples/polite_demo.py     # rate limit + robots
@@ -208,7 +198,7 @@ python examples/full_demo.py       # AdvancedCrawler с YAML-конфигом
 pytest
 ```
 
-Используется aioresponses - реальная сеть для тестов не нужна.
+Сетевой слой замокан через aioresponses.
 
 ## Структура проекта
 
@@ -247,5 +237,4 @@ tests/
   test_errors.py / test_retry.py / test_circuit.py
   test_storage.py / test_sitemap.py / test_stats.py
   test_config.py / test_advanced.py / test_utils.py
-  test_config.py / test_advanced.py
 ```
