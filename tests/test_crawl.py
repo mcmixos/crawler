@@ -207,3 +207,47 @@ def test_invalid_max_per_host_rejected():
 def test_invalid_max_depth_rejected():
     with pytest.raises(ValueError):
         AsyncCrawler(max_depth=-1)
+
+
+async def test_crawl_skips_robots_blocked_urls():
+    robots = "User-agent: *\nDisallow: /forbidden"
+    with aioresponses() as m:
+        m.get(
+            "https://example.test/robots.txt",
+            body=robots,
+            content_type="text/plain",
+        )
+        m.get(
+            "https://example.test/p1",
+            body=_page("https://example.test/forbidden", "https://example.test/p2"),
+            content_type="text/html",
+        )
+        m.get("https://example.test/p2", body=_page(), content_type="text/html")
+
+        async with AsyncCrawler(max_depth=2, respect_robots=True) as crawler:
+            results = await crawler.crawl(["https://example.test/p1"])
+            stats = crawler.get_stats()
+
+    assert "https://example.test/p1" in results
+    assert "https://example.test/p2" in results
+    assert "https://example.test/forbidden" not in results
+    assert stats["blocked_by_robots"] >= 1
+
+
+async def test_crawl_with_no_robots_file_allows_all():
+    with aioresponses() as m:
+        m.get("https://example.test/robots.txt", status=404)
+        m.get(
+            "https://example.test/p1",
+            body=_page("https://example.test/p2"),
+            content_type="text/html",
+        )
+        m.get("https://example.test/p2", body=_page(), content_type="text/html")
+
+        async with AsyncCrawler(max_depth=2, respect_robots=True) as crawler:
+            results = await crawler.crawl(["https://example.test/p1"])
+
+    assert set(results.keys()) == {
+        "https://example.test/p1",
+        "https://example.test/p2",
+    }

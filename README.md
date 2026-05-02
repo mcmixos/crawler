@@ -93,6 +93,37 @@ async with AsyncCrawler(
 
 `CrawlerQueue` - очередь с приоритетами, отслеживанием глубины и состояний (visited / processed / failed). Доступна как самостоятельный класс через `from crawler import CrawlerQueue`.
 
+## Polite crawling: rate limit, robots.txt, retries
+
+`AsyncCrawler` поддерживает контроль скорости и соблюдение robots.txt:
+
+```python
+async with AsyncCrawler(
+    requests_per_second=2.0,    # лимит частоты
+    min_delay=0.5,               # минимум 0.5с между запросами
+    jitter=0.2,                  # +случайно [0, 0.2с] для имитации человека
+    respect_robots=True,         # читать и соблюдать robots.txt
+    max_retries=3,               # ретраи на 5xx, 429, timeout, connection error
+    backoff_base=1.0,            # exp backoff: 1с, 2с, 4с, ...
+    user_agent="MyBot/1.0",      # либо list[str] для ротации
+) as crawler:
+    results = await crawler.crawl(
+        start_urls=["https://example.com"],
+        max_pages=50,
+        same_domain_only=True,
+    )
+    print(crawler.get_stats())
+```
+
+`get_stats()` возвращает `{requests, rate_per_sec, avg_interval_ms, avg_request_ms, blocked_by_robots, retries}`.
+
+При `respect_robots=True`:
+- robots.txt подгружается перед первым запросом к домену (один раз, кэшируется)
+- запрещённые URL пропускаются (raise `RobotsBlocked` из `fetch_url`)
+- `Crawl-delay` из robots.txt применяется поверх настроенного rate limit'а
+
+`RateLimiter` и `RobotsParser` доступны как самостоятельные классы через `from crawler import ...`.
+
 ## Демо
 
 ```
@@ -117,6 +148,8 @@ src/crawler/
   parser.py        - HTMLParser
   queue.py         - CrawlerQueue
   concurrency.py   - SemaphoreManager
+  rate_limiter.py  - RateLimiter
+  robots.py        - RobotsParser, RobotsBlocked
 examples/
   demo.py          - пример с замером времени
 tests/
