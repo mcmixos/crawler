@@ -53,6 +53,7 @@ class RetryStrategy:
         *args,
         **kwargs,
     ):
+        name = getattr(coro_func, "__name__", repr(coro_func))
         attempt = 0
         retried = False
         while True:
@@ -69,7 +70,7 @@ class RetryStrategy:
                         self._failures_after_retry += 1
                     logger.warning(
                         "give up: %s after %d attempt(s) - %s",
-                        coro_func.__name__, attempt + 1, exc.__class__.__name__,
+                        name, attempt + 1, exc.__class__.__name__,
                     )
                     raise
                 attempt += 1
@@ -82,7 +83,7 @@ class RetryStrategy:
                 self._total_retry_wait += wait
                 logger.info(
                     "retry %d/%d for %s after %.2fs (%s)",
-                    attempt, self._max_retries, coro_func.__name__,
+                    attempt, self._max_retries, name,
                     wait, exc.__class__.__name__,
                 )
                 await asyncio.sleep(wait)

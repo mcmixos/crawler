@@ -251,3 +251,58 @@ async def test_crawl_with_no_robots_file_allows_all():
         "https://example.test/p1",
         "https://example.test/p2",
     }
+
+
+async def test_crawl_circuit_blocked_urls_in_failed():
+    from crawler import CircuitBreaker
+
+    p1 = "https://example.test/p1"
+    p2 = "https://example.test/p2"
+    p3 = "https://example.test/p3"
+    cb = CircuitBreaker(failure_threshold=1, recovery_timeout=10.0)
+    with aioresponses() as m:
+        m.get(
+            p1,
+            body=_page(p2, p3),
+            content_type="text/html",
+        )
+        m.get(p2, status=500)
+        m.get(p3, status=500)
+
+        async with AsyncCrawler(
+            max_depth=2, max_concurrent=1, circuit_breaker=cb
+        ) as crawler:
+            results = await crawler.crawl([p1])
+            stats = crawler.get_stats()
+
+    assert p1 in results
+    assert p2 not in results
+    assert p3 not in results
+    assert stats["blocked_by_circuit"] >= 1
+
+
+async def test_crawl_circuit_does_not_open_on_404():
+    from crawler import CircuitBreaker
+
+    p1 = "https://example.test/p1"
+    p2 = "https://example.test/p2"
+    p3 = "https://example.test/p3"
+    cb = CircuitBreaker(failure_threshold=1, recovery_timeout=10.0)
+    with aioresponses() as m:
+        m.get(
+            p1,
+            body=_page(p2, p3),
+            content_type="text/html",
+        )
+        m.get(p2, status=404)
+        m.get(p3, status=404)
+
+        async with AsyncCrawler(
+            max_depth=2, max_concurrent=1, circuit_breaker=cb
+        ) as crawler:
+            results = await crawler.crawl([p1])
+            stats = crawler.get_stats()
+
+    assert p1 in results
+    assert stats["blocked_by_circuit"] == 0
+    assert cb.is_open("example.test") is False

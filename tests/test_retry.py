@@ -162,3 +162,20 @@ def test_invalid_backoff_base():
 def test_invalid_max_backoff():
     with pytest.raises(ValueError):
         RetryStrategy(max_backoff=0)
+
+
+async def test_works_with_functools_partial():
+    import functools
+
+    strategy = RetryStrategy(max_retries=2, backoff_base=0.01)
+    calls = {"n": 0}
+
+    async def base(value):
+        calls["n"] += 1
+        if calls["n"] < 2:
+            raise TransientError("retry me")
+        return value
+
+    bound = functools.partial(base, "ok")
+    result = await strategy.execute_with_retry(bound)
+    assert result == "ok"

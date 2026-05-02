@@ -122,20 +122,22 @@ class AsyncCrawler:
         self._request_count = 0
         self._total_request_time = 0.0
         self._blocked_count = 0
+        self._circuit_blocked_count = 0
         self._permanent_failures: dict[str, str] = {}
         self._stats_start_time: Optional[float] = None
 
     async def fetch_url(self, url: str) -> str:
         """Download a single URL and return its body as text.
 
-        Honors circuit breaker, robots.txt, rate limit, and retries transient/network
-        errors per the configured RetryStrategy. Permanent errors are not retried.
+        Honors circuit breaker, robots.txt, rate limit, and retries errors per the
+        configured RetryStrategy's retry_on filter (default: TransientError, NetworkError).
         """
         session = await self._ensure_session()
         domain = urlparse(url).netloc.lower()
         ua = self._pick_user_agent()
 
         if self._circuit_breaker is not None and self._circuit_breaker.is_open(domain):
+            self._circuit_blocked_count += 1
             raise CircuitOpenError(f"Circuit open for {domain}")
 
         if self._robots is not None:
@@ -165,7 +167,7 @@ class AsyncCrawler:
             )
         except CrawlerError as exc:
             self._permanent_failures[url] = f"{type(exc).__name__}: {exc}"
-            if self._circuit_breaker is not None and not isinstance(exc, CircuitOpenError):
+            if self._circuit_breaker is not None and isinstance(exc, (TransientError, NetworkError)):
                 self._circuit_breaker.record_failure(domain)
             raise
         self._record_success(request_start)
@@ -237,13 +239,21 @@ class AsyncCrawler:
                     )
 
     def get_stats(self) -> dict:
+        """Return runtime statistics.
+
+        Note: `error_counts` reflects per-attempt occurrences (3 retries on the same URL
+        count as 3 errors). `requests`/`successful_requests` count only successful fetches.
+        """
         retry_stats = self._retry_strategy.get_stats()
         base = {
             "requests": self._request_count,
+            "successful_requests": self._request_count,
+            "total_attempts": retry_stats["attempts_total"],
             "rate_per_sec": 0.0,
             "avg_interval_ms": 0.0,
             "avg_request_ms": 0.0,
             "blocked_by_robots": self._blocked_count,
+            "blocked_by_circuit": self._circuit_blocked_count,
             "retries": retry_stats["retries_total"],
             "retry_successes": retry_stats["successes_after_retry"],
             "retry_failures": retry_stats["failures_after_retry"],
