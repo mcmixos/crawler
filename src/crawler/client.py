@@ -101,7 +101,7 @@ class AsyncCrawler:
         self._total_request_time = 0.0
         self._blocked_count = 0
         self._retry_count = 0
-        self._stats_start_time = time.monotonic()
+        self._stats_start_time: Optional[float] = None
 
     async def fetch_url(self, url: str) -> str:
         """Download a single URL and return its body as text.
@@ -111,10 +111,11 @@ class AsyncCrawler:
         """
         session = await self._ensure_session()
         domain = urlparse(url).netloc.lower()
+        ua = self._pick_user_agent()
 
         if self._robots is not None:
             await self._ensure_robots(url)
-            if not self._robots.can_fetch(url, self._user_agents[0]):
+            if not self._robots.can_fetch(url, ua):
                 self._blocked_count += 1
                 logger.info("robots blocked: %s", url)
                 raise RobotsBlocked(url)
@@ -123,12 +124,16 @@ class AsyncCrawler:
             await self._rate_limiter.acquire(domain)
 
         async with self._sem_manager.acquire(url):
-            return await self._fetch_with_retry(session, url)
+            return await self._fetch_with_retry(session, url, ua)
 
-    async def _fetch_with_retry(self, session: aiohttp.ClientSession, url: str) -> str:
+    async def _fetch_with_retry(
+        self,
+        session: aiohttp.ClientSession,
+        url: str,
+        ua: str,
+    ) -> str:
         attempt = 0
         while True:
-            ua = self._pick_user_agent()
             request_start = time.perf_counter()
             try:
                 logger.info("GET %s", url)
@@ -172,6 +177,8 @@ class AsyncCrawler:
         return random.choice(self._user_agents)
 
     def _record_success(self, request_start: float) -> None:
+        if self._stats_start_time is None:
+            self._stats_start_time = time.monotonic()
         self._request_count += 1
         self._total_request_time += time.perf_counter() - request_start
 
@@ -203,12 +210,21 @@ class AsyncCrawler:
                 self._rate_limiter.set_domain_interval(domain, crawl_delay)
 
     def get_stats(self) -> dict:
+        if self._stats_start_time is None or self._request_count == 0:
+            return {
+                "requests": 0,
+                "rate_per_sec": 0.0,
+                "avg_interval_ms": 0.0,
+                "avg_request_ms": 0.0,
+                "blocked_by_robots": self._blocked_count,
+                "retries": self._retry_count,
+            }
         elapsed = max(time.monotonic() - self._stats_start_time, 1e-6)
-        avg_interval_ms = (elapsed / self._request_count * 1000) if self._request_count else 0.0
-        avg_request_ms = (
-            self._total_request_time / self._request_count * 1000
-            if self._request_count else 0.0
+        avg_interval_ms = (
+            elapsed / (self._request_count - 1) * 1000
+            if self._request_count > 1 else 0.0
         )
+        avg_request_ms = self._total_request_time / self._request_count * 1000
         return {
             "requests": self._request_count,
             "rate_per_sec": self._request_count / elapsed,
