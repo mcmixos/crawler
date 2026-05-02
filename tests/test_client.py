@@ -4,7 +4,7 @@ import aiohttp
 import pytest
 from aioresponses import aioresponses
 
-from crawler import AsyncCrawler
+from crawler import AsyncCrawler, NetworkError, PermanentError, TransientError
 
 
 async def test_fetch_url_returns_body():
@@ -21,7 +21,7 @@ async def test_fetch_url_raises_on_404():
     with aioresponses() as mocked:
         mocked.get(url, status=404)
         async with AsyncCrawler() as crawler:
-            with pytest.raises(aiohttp.ClientResponseError) as exc_info:
+            with pytest.raises(PermanentError) as exc_info:
                 await crawler.fetch_url(url)
     assert exc_info.value.status == 404
 
@@ -31,7 +31,7 @@ async def test_fetch_url_raises_on_500():
     with aioresponses() as mocked:
         mocked.get(url, status=500)
         async with AsyncCrawler() as crawler:
-            with pytest.raises(aiohttp.ClientResponseError) as exc_info:
+            with pytest.raises(TransientError) as exc_info:
                 await crawler.fetch_url(url)
     assert exc_info.value.status == 500
 
@@ -41,7 +41,7 @@ async def test_fetch_url_raises_on_timeout():
     with aioresponses() as mocked:
         mocked.get(url, exception=asyncio.TimeoutError())
         async with AsyncCrawler() as crawler:
-            with pytest.raises(asyncio.TimeoutError):
+            with pytest.raises(NetworkError):
                 await crawler.fetch_url(url)
 
 
@@ -50,7 +50,7 @@ async def test_fetch_url_raises_on_network_error():
     with aioresponses() as mocked:
         mocked.get(url, exception=aiohttp.ClientConnectionError("connection refused"))
         async with AsyncCrawler() as crawler:
-            with pytest.raises(aiohttp.ClientError):
+            with pytest.raises(NetworkError):
                 await crawler.fetch_url(url)
 
 
@@ -144,7 +144,7 @@ async def test_fetch_and_parse_propagates_fetch_errors():
     with aioresponses() as mocked:
         mocked.get(url, status=500)
         async with AsyncCrawler() as crawler:
-            with pytest.raises(aiohttp.ClientResponseError):
+            with pytest.raises(TransientError):
                 await crawler.fetch_and_parse(url)
 
 
@@ -173,7 +173,7 @@ async def test_fetch_url_does_not_retry_404():
     with aioresponses() as mocked:
         mocked.get(url, status=404)
         async with AsyncCrawler(max_retries=3, backoff_base=0.01) as crawler:
-            with pytest.raises(aiohttp.ClientResponseError) as exc_info:
+            with pytest.raises(PermanentError) as exc_info:
                 await crawler.fetch_url(url)
     assert exc_info.value.status == 404
 
@@ -185,7 +185,7 @@ async def test_fetch_url_exhausts_retries_and_raises():
         mocked.get(url, status=500)
         mocked.get(url, status=500)
         async with AsyncCrawler(max_retries=2, backoff_base=0.01) as crawler:
-            with pytest.raises(aiohttp.ClientResponseError) as exc_info:
+            with pytest.raises(TransientError) as exc_info:
                 await crawler.fetch_url(url)
     assert exc_info.value.status == 500
 
@@ -241,3 +241,55 @@ def test_invalid_requests_per_second_rejected():
 def test_empty_user_agent_list_rejected():
     with pytest.raises(ValueError):
         AsyncCrawler(user_agent=[])
+
+
+def test_invalid_total_timeout_rejected():
+    with pytest.raises(ValueError):
+        AsyncCrawler(total_timeout=0)
+
+
+async def test_permanent_failure_recorded():
+    url = "https://example.test/missing"
+    with aioresponses() as mocked:
+        mocked.get(url, status=404)
+        async with AsyncCrawler() as crawler:
+            with pytest.raises(PermanentError):
+                await crawler.fetch_url(url)
+            stats = crawler.get_stats()
+    assert url in stats["permanent_failure_urls"]
+
+
+async def test_circuit_breaker_blocks_after_failures():
+    from crawler import CircuitBreaker, CircuitOpenError
+
+    url = "https://example.test/dead"
+    cb = CircuitBreaker(failure_threshold=2, recovery_timeout=10.0)
+    with aioresponses() as mocked:
+        mocked.get(url, status=500)
+        mocked.get(url, status=500)
+        async with AsyncCrawler(circuit_breaker=cb) as crawler:
+            with pytest.raises(TransientError):
+                await crawler.fetch_url(url)
+            with pytest.raises(TransientError):
+                await crawler.fetch_url(url)
+            with pytest.raises(CircuitOpenError):
+                await crawler.fetch_url(url)
+
+
+async def test_circuit_breaker_resets_on_success():
+    from crawler import CircuitBreaker
+
+    bad = "https://example.test/bad"
+    good = "https://example.test/good"
+    cb = CircuitBreaker(failure_threshold=2)
+    with aioresponses() as mocked:
+        mocked.get(bad, status=500)
+        mocked.get(good, status=200, body="ok")
+        mocked.get(bad, status=500)
+        async with AsyncCrawler(circuit_breaker=cb) as crawler:
+            with pytest.raises(TransientError):
+                await crawler.fetch_url(bad)
+            await crawler.fetch_url(good)
+            with pytest.raises(TransientError):
+                await crawler.fetch_url(bad)
+            assert cb.is_open("example.test") is False

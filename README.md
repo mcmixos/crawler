@@ -124,6 +124,53 @@ async with AsyncCrawler(
 
 `RateLimiter` и `RobotsParser` доступны как самостоятельные классы через `from crawler import ...`.
 
+## Обработка ошибок и повторы
+
+Все низкоуровневые исключения (`aiohttp.ClientResponseError`, `asyncio.TimeoutError`, `ClientConnectionError`) переоборачиваются в нашу таксономию:
+
+- `TransientError` - 5xx, 429, payload errors (retryable по дефолту)
+- `NetworkError` - timeouts, connection errors (retryable по дефолту)
+- `PermanentError` - 4xx (кроме 429), unknown errors (НЕ retryable)
+- `ParseError` - HTML parsing errors
+- `CircuitOpenError` - circuit breaker заблокировал домен
+- Все наследуют `CrawlerError`
+
+Все имеют опциональный атрибут `.status` (для HTTP-ошибок).
+
+`RetryStrategy` управляет повторами:
+
+```python
+from crawler import RetryStrategy, TransientError, NetworkError
+
+retry = RetryStrategy(
+    max_retries=3,
+    backoff_factor=2.0,        # exp factor: wait *= 2 на каждой попытке
+    backoff_base=1.0,           # стартовый wait в секундах
+    max_backoff=60.0,           # потолок wait
+    retry_on=[TransientError, NetworkError],
+)
+
+# standalone использование:
+result = await retry.execute_with_retry(some_async_func, arg1, arg2)
+
+# или через AsyncCrawler:
+crawler = AsyncCrawler(retry_strategy=retry)
+```
+
+`CircuitBreaker` останавливает запросы к проблемному домену:
+
+```python
+from crawler import CircuitBreaker
+
+breaker = CircuitBreaker(
+    failure_threshold=5,        # фейлов подряд до открытия
+    recovery_timeout=60.0,      # секунд до автозакрытия
+)
+crawler = AsyncCrawler(circuit_breaker=breaker)
+```
+
+`get_stats()` дополнительно возвращает: `retry_successes`, `retry_failures`, `retry_avg_wait_ms`, `error_counts` (по типам), `permanent_failure_urls`.
+
 ## Демо
 
 ```
@@ -150,11 +197,14 @@ src/crawler/
   concurrency.py   - SemaphoreManager
   rate_limiter.py  - RateLimiter
   robots.py        - RobotsParser, RobotsBlocked
+  errors.py        - CrawlerError + classify_exception
+  retry.py         - RetryStrategy, CircuitBreaker
 examples/
   demo.py          - параллель vs последовательно (день 1)
   parse_demo.py    - парсинг страниц + JSON (день 2)
   crawl_demo.py    - обход с очередью и глубиной (день 3)
   polite_demo.py   - rate limit + robots.txt + retries (день 4)
+  resilient_demo.py - обработка ошибок + circuit breaker (день 5)
 tests/
   test_client.py
   test_parser.py
@@ -163,4 +213,7 @@ tests/
   test_crawl.py
   test_rate_limiter.py
   test_robots.py
+  test_errors.py
+  test_retry.py
+  test_circuit.py
 ```
