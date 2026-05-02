@@ -276,6 +276,79 @@ async def test_circuit_breaker_blocks_after_failures():
                 await crawler.fetch_url(url)
 
 
+async def test_fetch_with_meta_returns_status_and_content_type():
+    url = "https://example.test/page"
+    with aioresponses() as mocked:
+        mocked.get(url, status=200, body="hi", content_type="text/plain")
+        async with AsyncCrawler() as crawler:
+            meta = await crawler.fetch_with_meta(url)
+    assert meta["text"] == "hi"
+    assert meta["status_code"] == 200
+    assert "text/plain" in meta["content_type"]
+
+
+async def test_fetch_and_parse_includes_metadata_fields():
+    url = "https://example.test/page"
+    html = "<html><head><title>T</title></head><body></body></html>"
+    with aioresponses() as mocked:
+        mocked.get(url, status=200, body=html, content_type="text/html")
+        async with AsyncCrawler() as crawler:
+            data = await crawler.fetch_and_parse(url)
+    assert data["status_code"] == 200
+    assert "text/html" in data["content_type"]
+    assert "crawled_at" in data
+    assert "T" in data["title"]
+
+
+async def test_crawl_saves_to_storage():
+    from crawler import DataStorage
+
+    class _Recorder(DataStorage):
+        def __init__(self):
+            super().__init__()
+            self.saved = []
+
+        async def _do_save(self, data):
+            self.saved.append(data["url"])
+
+        async def close(self):
+            pass
+
+    p1 = "https://example.test/p1"
+    p2 = "https://example.test/p2"
+    storage = _Recorder()
+    with aioresponses() as m:
+        m.get(p1, body=f"<a href='{p2}'>x</a>", content_type="text/html")
+        m.get(p2, body="<html></html>", content_type="text/html")
+        async with AsyncCrawler(storage=storage, max_depth=2) as crawler:
+            await crawler.crawl([p1])
+
+    assert set(storage.saved) == {p1, p2}
+
+
+async def test_crawl_continues_when_storage_fails():
+    from crawler import DataStorage
+
+    class _AlwaysFails(DataStorage):
+        def __init__(self):
+            super().__init__(max_save_retries=0)
+
+        async def _do_save(self, data):
+            raise RuntimeError("disk full")
+
+        async def close(self):
+            pass
+
+    p1 = "https://example.test/p1"
+    storage = _AlwaysFails()
+    with aioresponses() as m:
+        m.get(p1, body="<html></html>", content_type="text/html")
+        async with AsyncCrawler(storage=storage) as crawler:
+            results = await crawler.crawl([p1])
+
+    assert p1 in results
+
+
 async def test_circuit_breaker_resets_on_success():
     from crawler import CircuitBreaker
 

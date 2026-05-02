@@ -171,6 +171,32 @@ crawler = AsyncCrawler(circuit_breaker=breaker)
 
 `get_stats()` дополнительно возвращает: `retry_successes`, `retry_failures`, `retry_avg_wait_ms`, `error_counts` (по типам), `permanent_failure_urls`.
 
+## Сохранение данных
+
+Три встроенных бэкенда (`JSONStorage`, `CSVStorage`, `SQLiteStorage`) реализуют общий интерфейс `DataStorage` с retry-логикой save'ов из коробки.
+
+```python
+from crawler import AsyncCrawler, JSONStorage, SQLiteStorage
+
+# JSON Lines (NDJSON), append-friendly, для больших объёмов
+async with JSONStorage("output/pages.jsonl") as storage:
+    async with AsyncCrawler(storage=storage) as crawler:
+        await crawler.crawl(start_urls=["https://example.com"])
+
+# SQLite с batch-вставками
+async with SQLiteStorage("output/pages.db", batch_size=100) as storage:
+    async with AsyncCrawler(storage=storage) as crawler:
+        await crawler.crawl(start_urls=["https://example.com"])
+```
+
+При интеграции с `AsyncCrawler` сохранение происходит **после каждой обработанной страницы**. Ошибка save не валит crawl - логируется и продолжается.
+
+`fetch_and_parse(url)` теперь возвращает расширенный dict: добавлены `crawled_at` (ISO UTC), `status_code`, `content_type`. Это формат, который пишется в storage.
+
+`fetch_with_meta(url)` - публичный метод для получения text + status_code + content_type без парсинга HTML.
+
+Каждый storage поддерживает `async with` и имеет свой retry на save (по умолчанию 2 попытки с экспоненциальным backoff). Для SQLite есть `init_db()` для явной инициализации схемы.
+
 ## Демо
 
 ```
@@ -199,12 +225,14 @@ src/crawler/
   robots.py        - RobotsParser, RobotsBlocked
   errors.py        - CrawlerError + classify_exception
   retry.py         - RetryStrategy, CircuitBreaker
+  storage.py       - DataStorage, JSONStorage, CSVStorage, SQLiteStorage
 examples/
   demo.py          - параллель vs последовательно (день 1)
   parse_demo.py    - парсинг страниц + JSON (день 2)
   crawl_demo.py    - обход с очередью и глубиной (день 3)
   polite_demo.py   - rate limit + robots.txt + retries (день 4)
   resilient_demo.py - обработка ошибок + circuit breaker (день 5)
+  storage_demo.py  - сохранение в JSON/CSV/SQLite + readback (день 6)
 tests/
   test_client.py
   test_parser.py
@@ -216,4 +244,5 @@ tests/
   test_errors.py
   test_retry.py
   test_circuit.py
+  test_storage.py
 ```

@@ -3,6 +3,7 @@ import logging
 import random
 import re
 import time
+from datetime import datetime, timezone
 from typing import Optional
 from urllib.parse import urlparse
 
@@ -21,6 +22,7 @@ from crawler.queue import CrawlerQueue
 from crawler.rate_limiter import RateLimiter
 from crawler.retry import CircuitBreaker, RetryStrategy
 from crawler.robots import RobotsBlocked, RobotsParser
+from crawler.storage import DataStorage
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +47,7 @@ class AsyncCrawler:
         backoff_base: float = 1.0,
         retry_strategy: Optional[RetryStrategy] = None,
         circuit_breaker: Optional[CircuitBreaker] = None,
+        storage: Optional[DataStorage] = None,
         connect_timeout: float = 10.0,
         read_timeout: float = 30.0,
         total_timeout: Optional[float] = None,
@@ -95,6 +98,7 @@ class AsyncCrawler:
             retry_on=[TransientError, NetworkError],
         )
         self._circuit_breaker = circuit_breaker
+        self._storage = storage
         self._sem_manager = SemaphoreManager(
             max_concurrent=max_concurrent,
             max_per_host=max_per_host,
@@ -127,7 +131,12 @@ class AsyncCrawler:
         self._stats_start_time: Optional[float] = None
 
     async def fetch_url(self, url: str) -> str:
-        """Download a single URL and return its body as text.
+        """Download a single URL and return its body as text."""
+        meta = await self.fetch_with_meta(url)
+        return meta["text"]
+
+    async def fetch_with_meta(self, url: str) -> dict:
+        """Download a URL and return {text, status_code, content_type}.
 
         Honors circuit breaker, robots.txt, rate limit, and retries errors per the
         configured RetryStrategy's retry_on filter (default: TransientError, NetworkError).
@@ -159,10 +168,10 @@ class AsyncCrawler:
         url: str,
         ua: str,
         domain: str,
-    ) -> str:
+    ) -> dict:
         request_start = time.perf_counter()
         try:
-            text = await self._retry_strategy.execute_with_retry(
+            meta = await self._retry_strategy.execute_with_retry(
                 self._do_fetch, session, url, ua,
             )
         except CrawlerError as exc:
@@ -173,20 +182,25 @@ class AsyncCrawler:
         self._record_success(request_start)
         if self._circuit_breaker is not None:
             self._circuit_breaker.record_success(domain)
-        logger.info("OK %s (%d bytes)", url, len(text))
-        return text
+        logger.info("OK %s (%d bytes)", url, len(meta["text"]))
+        return meta
 
     async def _do_fetch(
         self,
         session: aiohttp.ClientSession,
         url: str,
         ua: str,
-    ) -> str:
+    ) -> dict:
         try:
             logger.info("GET %s", url)
             async with session.get(url, headers={"User-Agent": ua}) as response:
                 response.raise_for_status()
-                return await response.text()
+                text = await response.text()
+                return {
+                    "text": text,
+                    "status_code": response.status,
+                    "content_type": response.headers.get("Content-Type"),
+                }
         except CrawlerError:
             raise
         except Exception as exc:
@@ -285,9 +299,17 @@ class AsyncCrawler:
         }
 
     async def fetch_and_parse(self, url: str) -> dict:
-        """Fetch a URL and parse its HTML body into structured data."""
-        html = await self.fetch_url(url)
-        return await self._parser.parse_html(html, url)
+        """Fetch a URL and parse its HTML body into structured data.
+
+        Returns the parser dict enriched with crawled_at (ISO UTC), status_code,
+        and content_type from the HTTP response.
+        """
+        meta = await self.fetch_with_meta(url)
+        parsed = await self._parser.parse_html(meta["text"], url)
+        parsed["crawled_at"] = datetime.now(timezone.utc).isoformat()
+        parsed["status_code"] = meta["status_code"]
+        parsed["content_type"] = meta["content_type"]
+        return parsed
 
     async def crawl(
         self,
@@ -342,6 +364,13 @@ class AsyncCrawler:
                 try:
                     data = await self.fetch_and_parse(url)
                     queue.mark_processed(url, data)
+                    if self._storage is not None:
+                        try:
+                            await self._storage.save(data)
+                        except Exception as save_exc:
+                            logger.warning(
+                                "save failed for %s: %s", url, save_exc,
+                            )
                     depth = queue.get_depth(url)
                     if depth < self._max_depth and queue.get_stats()["processed"] < max_pages:
                         async with cond:

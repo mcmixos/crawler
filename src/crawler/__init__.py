@@ -14,14 +14,18 @@ from crawler.queue import CrawlerQueue
 from crawler.rate_limiter import RateLimiter
 from crawler.retry import CircuitBreaker, RetryStrategy
 from crawler.robots import RobotsBlocked, RobotsParser
+from crawler.storage import CSVStorage, DataStorage, JSONStorage, SQLiteStorage
 
 __all__ = [
     "AsyncCrawler",
+    "CSVStorage",
     "CircuitBreaker",
     "CircuitOpenError",
     "CrawlerError",
     "CrawlerQueue",
+    "DataStorage",
     "HTMLParser",
+    "JSONStorage",
     "NetworkError",
     "ParseError",
     "PermanentError",
@@ -29,6 +33,7 @@ __all__ = [
     "RetryStrategy",
     "RobotsBlocked",
     "RobotsParser",
+    "SQLiteStorage",
     "SemaphoreManager",
     "TransientError",
     "classify_exception",
